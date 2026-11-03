@@ -1,0 +1,29 @@
+name: Release
+on:
+  push:
+    tags:
+      - 'v*'
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Verify version matches tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node --input-type=module -e 'import fs from "node:fs"; const p=JSON.parse(fs.readFileSync("package.json")); if (`v${p.version}` !== process.env.RELEASE_TAG) process.exit(1);'
+      - run: npm run check
+      - run: npm test
+      - run: bash -n setup-runtime.sh
+      - run: npm pack --ignore-scripts
+      - name: Publish release archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release create "$RELEASE_TAG" ./dsh-wsl-workspace-*.tgz --verify-tag --title "$RELEASE_TAG" --generate-notes
