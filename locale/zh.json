@@ -1,0 +1,7 @@
+{
+  "meta":{"title":"WSL 工作区","description":"选择 WSL 发行版和 Linux 目录，在浏览器中打开独立的 Harness 后端。"},
+  "setupNotice": "首次使用：请先在所选 WSL 发行版中手动安装专用 Harness 运行时，再准备工作区。安装本插件不会自动安装该运行时。Windows 文件夹无需进行 WSL 初始化。",
+  "setupGuide": "查看首次初始化说明",
+  "setupUrl": "https://github.com/dpj135/dsh-wsl-workspace",
+  "title":"选择工作区环境","launcher":"WSL 工作区","windows":"Windows 本地","wsl":"WSL / Linux","notice":"WSL 工作区将在新的浏览器标签页中使用独立 Linux 后端。现有 Windows 会话不会迁移；如有需要，请在新后端配置模型。","native":"选择 Windows 文件夹","distro":"发行版","path":"Linux 目录","browse":"浏览","up":"上级目录","home":"主目录","prepare":"准备工作区","open":"在浏览器中打开","cancel":"取消","close":"关闭","loading":"正在加载…","starting":"正在准备 Linux 后端…","empty":"没有子目录。","noDistros":"未找到 WSL 发行版。请安装发行版后重试。","retry":"重新加载","recent":"最近的 WSL 工作区","noneRecent":"暂无最近的 WSL 工作区。","truncated":"仅显示部分目录。可输入精确路径继续。","ready":"工作区已就绪。请通过下方授权链接在浏览器中打开。","error":"请求失败","invalidUrl":"后端返回了不安全的网址，仅允许本机回环 HTTP(S) 链接。","invalidPath":"请输入以 / 开头的 Linux 绝对目录。","busy":"正在添加工作区，请稍候。","stopNotice":"关闭此窗口会取消请求，但不会停止已经启动的后端。"
+}

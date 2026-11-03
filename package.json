@@ -1,0 +1,20 @@
+{
+  "name": "dsh-wsl-workspace",
+  "version": "0.1.0",
+  "description": "Windows and fixed WSL workspaces for DeepSeek Harness with independent Linux backends",
+  "type": "module",
+  "license": "MIT",
+  "author": "dpj135 <deepjay@163.com>",
+  "repository": {"type": "git", "url": "git+https://github.com/dpj135/dsh-wsl-workspace.git"},
+  "homepage": "https://github.com/dpj135/dsh-wsl-workspace#readme",
+  "bugs": {"url": "https://github.com/dpj135/dsh-wsl-workspace/issues"},
+  "keywords": ["deepseek-harness", "cordis", "wsl", "workspace"],
+  "engines": {"dsh": "0.2.1-rc.5", "node": ">=24"},
+  "exports": {".": "./index.js", "./client": "./client.js", "./locale/*.json": "./locale/*.json", "./icon": "./icon.svg"},
+  "files": ["index.js", "backend.js", "client.js", "bridge.js", "bridge.patch.yml", "cordis.patch.yml", "linux/package.json", "linux/index.js", "linux/supervise.py", "locale/*.json", "icon.svg", "setup-runtime.sh", "README.md", "README.en.md", "CHANGELOG.md", "SECURITY.md", "LICENSE", "tests/**/*.mjs", "tests/**/*.py"],
+  "scripts": {"test": "node --test tests/*.test.mjs", "check": "node --check index.js && node --check backend.js && node --check client.js && node --check bridge.js"},
+  "dsh": {
+    "bundle": {"patch": "./cordis.patch.yml"},
+    "client": {"platform": "web", "immediately": true, "inject": ["@deepseek-ai/dsh-client-ui-workspace"]}
+  }
+}

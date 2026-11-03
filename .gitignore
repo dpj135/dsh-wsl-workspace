@@ -1,0 +1,10 @@
+node_modules/
+*.log
+.DS_Store
+.env
+.env.*
+workspaces.json
+result.json
+acceptance/result.json
+acceptance/testRoot/
+tests/tmp/
