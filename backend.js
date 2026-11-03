@@ -10,6 +10,16 @@ const exec = promisify(execFile);
 const packageDirectory = dirname(fileURLToPath(import.meta.url));
 export const NODE_VERSION = '24.11.0';
 export const DSH_VERSION = '0.2.1-rc.5';
+const SETUP_TIMEOUT_MS = 15 * 60 * 1000;
+const SETUP_LOG_LIMIT = 8192;
+function redactSetupLine(value) {
+  return value.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, '$1[redacted]@')
+    .replace(/((?:access[_-]?token|refresh[_-]?token|token|password|passwd|secret|api[_-]?key|authorization|cookie)\s*[=:]\s*)[^\r\n]+/gi, '$1[redacted]')
+    .replace(/\bBearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(/\b(?:gh[pousr]_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]+)\b/g, '[redacted]');
+}
+
 export function defaultStateDirectory() {
   return join(process.env.LOCALAPPDATA || join(homedir(), '.local', 'share'), 'dsh-wsl-workspace');
 }
@@ -73,6 +83,9 @@ export class WslBackendManager {
     this.stateDirectory = resolve(stateDirectory || defaultStateDirectory());
     this.recentFile = join(this.stateDirectory, 'workspaces.json');
     this.running = new Map();
+    this.setups = new Map();
+    this.spawnProcess = typeof options === 'object' && options.spawnProcess ? options.spawnProcess : spawn;
+    this.setupTimeoutMs = typeof options === 'object' && options.setupTimeoutMs !== undefined ? Math.min(SETUP_TIMEOUT_MS, Math.max(1, options.setupTimeoutMs)) : SETUP_TIMEOUT_MS;
     this.closed = false;
     this.saving = Promise.resolve();
     this.controller = new AbortController();
@@ -104,6 +117,75 @@ export class WslBackendManager {
     const setupScriptWindows = join(packageDirectory, 'setup-runtime.sh');
     const script = await this.linuxPath(distro, setupScriptWindows);
     return { distro, ...result, setupScriptWindows, setupCommand: `wsl.exe -d ${powershellQuote(distro)} --exec bash ${powershellQuote(script)}` };
+  }
+  // Called only by the Host's explicitly confirmed user route, never action().
+  startSetup(distro) {
+    this.assertOpen(); text(distro, 'distribution');
+    const existing = this.setups.get(distro);
+    if (existing && existing.state !== 'failed') return this.setupStatus(distro);
+    const record = { distro, state: 'running', log: '', startedAt: new Date().toISOString() };
+    this.setups.set(distro, record);
+    record.ready = this.runSetup(record);
+    return this.setupStatus(distro);
+  }
+  setupStatus(distro) {
+    text(distro, 'distribution');
+    const record = this.setups.get(distro);
+    if (!record) return { distro, state: 'failed', log: '', error: 'Runtime setup has not been started.' };
+    const { state, log, startedAt, finishedAt, error } = record;
+    return { distro, state, log, startedAt, ...(finishedAt ? { finishedAt } : {}), ...(error ? { error } : {}) };
+  }
+  async setup(distro) {
+    this.startSetup(distro);
+    await this.setups.get(distro).ready;
+    return this.setupStatus(distro);
+  }
+  async runSetup(record) {
+    const timeout = new AbortController();
+    const timer = setTimeout(() => timeout.abort(), this.setupTimeoutMs);
+    const signal = AbortSignal.any([this.controller.signal, timeout.signal]);
+    let rejectAbort;
+    const aborted = new Promise((_, reject) => { rejectAbort = () => reject(new Error(timeout.signal.aborted ? 'Runtime setup exceeded 15 minutes.' : 'Plugin is shutting down.')); signal.addEventListener('abort', rejectAbort, { once: true }); });
+    // Consume the abort promise immediately, including errors before a process exists.
+    aborted.catch(() => {});
+    try {
+      await Promise.race([this.validate(record.distro), aborted]);
+      const script = await Promise.race([this.linuxPath(record.distro, join(packageDirectory, 'setup-runtime.sh')), aborted]);
+      const supervisor = await Promise.race([this.linuxPath(record.distro, join(packageDirectory, 'linux', 'supervise.py')), aborted]);
+      this.assertOpen(); signal.throwIfAborted();
+      const child = this.spawnProcess('wsl.exe', ['-d', record.distro, '--exec', 'python3', supervisor, 'bash', script], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+      record.process = child;
+      child.stdin.on('error', () => {});
+      record.exited = new Promise(resolveExit => { child.once('exit', resolveExit); child.once('error', resolveExit); });
+      // Only complete lines are published: secrets split across chunks cannot leak.
+      const append = value => { record.log = (record.log + redactSetupLine(value) + '\n').slice(-SETUP_LOG_LIMIT); };
+      const attach = stream => {
+        stream.setEncoding('utf8'); let pending = '', dropping = false;
+        stream.on('data', chunk => {
+          for (const part of chunk.split(/(?<=\n)/)) {
+            if (!dropping) pending += part;
+            if (pending.length > SETUP_LOG_LIMIT) { pending = ''; dropping = true; }
+            if (part.endsWith('\n')) { append(dropping ? '[oversized progress line omitted]' : pending.trimEnd()); pending = ''; dropping = false; }
+          }
+        });
+        stream.on('end', () => { if (pending || dropping) append(dropping ? '[oversized progress line omitted]' : pending); });
+      };
+      attach(child.stdout); attach(child.stderr);
+      const completion = new Promise((resolveDone, reject) => {
+        child.once('error', () => reject(new Error('Could not start the WSL runtime installer.')));
+        child.once('close', (code, signalName) => code === 0 ? resolveDone() : reject(new Error(`Runtime setup exited (${code ?? signalName ?? 'unknown'}).`)));
+      });
+      await Promise.race([completion, aborted]);
+      signal.throwIfAborted();
+      record.state = 'succeeded';
+    } catch (error) {
+      record.error = redactSetupLine(String(error.message || error)).slice(-2048);
+      await this.stopRecord(record);
+      record.state = 'failed';
+    } finally {
+      clearTimeout(timer); signal.removeEventListener('abort', rejectAbort);
+      record.finishedAt = new Date().toISOString();
+    }
   }
   async list(distro, path) {
     if (path !== undefined && path !== '') directory(path);
@@ -222,7 +304,7 @@ export class WslBackendManager {
   async dispose() {
     if (this.disposing) return this.disposing;
     this.closed = true; this.controller.abort();
-    const records = [...this.running.values()];
+    const records = [...this.running.values(), ...this.setups.values()];
     this.disposing = Promise.allSettled(records.map(async record => {
       await this.stopRecord(record);
       await record.ready?.catch(() => {});

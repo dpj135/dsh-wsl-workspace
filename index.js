@@ -8,7 +8,19 @@ export function apply(ctx) {
     try {
       const raw = await request.text();
       if (raw.length > 16384) throw new Error('Request too large.');
-      return Response.json(await manager.action(JSON.parse(raw)), { headers: { 'Cache-Control': 'no-store' } });
+      const input = JSON.parse(raw);
+      let result;
+      if (input?.action === 'setup-start') {
+        if (input.confirmed !== true) throw new Error('Runtime setup requires explicit user confirmation.');
+        if (Object.keys(input).some(key => !['action', 'distro', 'confirmed'].includes(key))) throw new Error('Unknown setup field.');
+        result = await manager.startSetup(input.distro);
+      } else if (input?.action === 'setup-status') {
+        if (Object.keys(input).some(key => !['action', 'distro'].includes(key))) throw new Error('Unknown setup-status field.');
+        result = await manager.setupStatus(input.distro);
+      } else {
+        result = await manager.action(input);
+      }
+      return Response.json(result, { headers: { 'Cache-Control': 'no-store' } });
     } catch (error) {
       return Response.json({ error: error.message }, { status: 400, headers: { 'Cache-Control': 'no-store' } });
     }
